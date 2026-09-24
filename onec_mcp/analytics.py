@@ -6,6 +6,7 @@ import math
 from collections import defaultdict
 from datetime import date, timedelta
 from typing import Any, Iterable
+from urllib.parse import quote
 
 from onec_mcp.odata import EMPTY_REF, ODataClient, ODataError, dt_literal
 
@@ -320,14 +321,17 @@ def customer_orders_summary(client: ODataClient, directory: Directory, date_from
     }
 
 
-def supplier_letters(lines: list[dict], sender: str | None = None) -> dict[str, str]:
+def supplier_letters(lines: list[dict], sender: str | None = None, emails: dict[str, str] | None = None) -> dict[str, dict]:
     """Черновики писем поставщикам по строкам заявки (analytics.reorder_suggestion(...)['строки']).
-    Только текст — ничего не отправляет. Ключ — имя поставщика, значение — текст письма."""
+    Только готовит текст и, если для поставщика есть email в emails, ссылку mailto: для открытия
+    в почтовом клиенте с уже заполненными темой и текстом. Само письмо не отправляет.
+    Ключ результата — имя поставщика; значение — {"текст", "email", "mailto"}."""
     by_supplier: dict[str, list[dict]] = defaultdict(list)
     for line in lines:
         by_supplier[line["Поставщик"]].append(line)
 
-    letters: dict[str, str] = {}
+    emails = emails or {}
+    letters: dict[str, dict] = {}
     for supplier, items in by_supplier.items():
         rows = "\n".join(
             f"{i:>2}. {r['Номенклатура']}"
@@ -338,8 +342,8 @@ def supplier_letters(lines: list[dict], sender: str | None = None) -> dict[str, 
         total = sum(r["Сумма (по посл. цене)"] or 0 for r in items)
         total_str = f"{total:,.2f}".replace(",", " ").replace(".", ",")
         total_line = f"\n\nОриентировочная сумма (по последней цене закупки): {total_str} ₽." if total else ""
-        letters[supplier] = (
-            f"Тема: Заявка на поставку\n\n"
+        subject = f"Заявка на поставку — {supplier}"
+        body = (
             f"Здравствуйте!\n\n"
             f"Просим сообщить наличие и подготовить счёт на следующие позиции:\n\n"
             f"{rows}"
@@ -347,4 +351,12 @@ def supplier_letters(lines: list[dict], sender: str | None = None) -> dict[str, 
             f"Просим уточнить сроки поставки.\n\n"
             f"С уважением,\n{sender or '[укажите имя и контакты]'}"
         )
+        email = emails.get(supplier)
+        letters[supplier] = {
+            "текст": f"Тема: {subject}\n\n{body}",
+            "email": email,
+            # Открывает письмо в почтовом клиенте по умолчанию с заполненными темой и текстом —
+            # само письмо не уходит, пока человек сам не нажмёт «Отправить».
+            "mailto": (f"mailto:{quote(email)}?subject={quote(subject)}&body={quote(body)}" if email else None),
+        }
     return letters
