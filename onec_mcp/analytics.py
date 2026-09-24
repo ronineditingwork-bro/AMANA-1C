@@ -186,10 +186,14 @@ def last_purchases(client: ODataClient, date_from: date, date_to: date) -> dict[
     result: dict[str, dict] = {}
     for doc in docs:  # отсортированы по дате, поздние перезаписывают ранние
         for row in doc.get("Товары") or []:
+            # Цена в документе — за упаковку, а Количество и Сумма — в базовой единице,
+            # поэтому настоящую цену за единицу берём как Сумма / Количество.
+            qty = _num(row.get("Количество"))
+            price = _num(row.get("Сумма")) / qty if qty else _num(row.get("Цена"))
             result[row.get("Номенклатура_Key")] = {
                 "partner": doc.get("Партнер_Key"),
                 "date": (doc.get("Date") or "")[:10],
-                "price": _num(row.get("Цена")),
+                "price": round(price, 2),
             }
     return result
 
