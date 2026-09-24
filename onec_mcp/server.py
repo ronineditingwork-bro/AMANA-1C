@@ -220,12 +220,13 @@ def reorder_suggestion(
     cover_days: int = 30,
     warehouse: str | None = None,
     supplier: str | None = None,
-    max_lines: int = 200,
+    max_lines: int = 40,
     save_csv: bool = True,
 ) -> dict[str, Any]:
     """Черновик заявок поставщикам. Для каждого товара: средние продажи в день за sales_days,
     нужно = продажи_в_день × (lead_days + cover_days) − (в наличии − резерв) − в пути.
-    Поставщик — из последнего поступления товара. Ничего в 1С не создаёт, только считает и сохраняет CSV."""
+    Поставщик — из последнего поступления товара. Ничего в 1С не создаёт, только считает и сохраняет CSV.
+    В ответе итоги по поставщикам и max_lines самых срочных строк; полный список — в файле CSV."""
     try:
         client = _client()
         result = analytics.reorder_suggestion(
@@ -237,7 +238,9 @@ def reorder_suggestion(
     if save_csv:
         result["файл"] = _save_csv(lines, "заявка_поставщикам")
     result["строк всего"] = len(lines)
-    result["строки"] = lines[:max_lines]
+    # В ответ — самые срочные позиции; полный список по поставщикам — в CSV.
+    result["строки (самые срочные)"] = sorted(lines, key=lambda r: r["Дней хватит"])[:max_lines]
+    del result["строки"]
     return result
 
 
