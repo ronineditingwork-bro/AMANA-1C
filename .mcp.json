@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "1c": {
+      "command": "python",
+      "args": ["-m", "onec_mcp"]
+    }
+  }
+}
