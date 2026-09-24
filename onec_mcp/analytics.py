@@ -360,3 +360,23 @@ def supplier_letters(lines: list[dict], sender: str | None = None, emails: dict[
             "mailto": (f"mailto:{quote(email)}?subject={quote(subject)}&body={quote(body)}" if email else None),
         }
     return letters
+
+
+def recent_customer_orders(client: ODataClient, directory: Directory, limit: int = 10) -> list[dict]:
+    """Последние N заказов клиентов, самые новые первыми — для команды GET_ORDERS."""
+    rows = client.query(
+        "Document_ЗаказКлиента",
+        select="Number,Date,Партнер_Key,Статус,СуммаДокумента,Posted",
+        orderby="Date desc",
+        top=limit,
+    )
+    return [
+        {
+            "Номер": r.get("Number"),
+            "Дата": (r.get("Date") or "")[:10],
+            "Клиент": directory.partner_name(r.get("Партнер_Key")),
+            "Статус": r.get("Статус") or ("Проведён" if r.get("Posted") else "Не проведён"),
+            "Сумма": round(_num(r.get("СуммаДокумента")), 2),
+        }
+        for r in rows
+    ]
