@@ -318,3 +318,33 @@ def customer_orders_summary(client: ODataClient, directory: Directory, date_from
             for k, v in _top(by_item, "сумма")
         ],
     }
+
+
+def supplier_letters(lines: list[dict], sender: str | None = None) -> dict[str, str]:
+    """Черновики писем поставщикам по строкам заявки (analytics.reorder_suggestion(...)['строки']).
+    Только текст — ничего не отправляет. Ключ — имя поставщика, значение — текст письма."""
+    by_supplier: dict[str, list[dict]] = defaultdict(list)
+    for line in lines:
+        by_supplier[line["Поставщик"]].append(line)
+
+    letters: dict[str, str] = {}
+    for supplier, items in by_supplier.items():
+        rows = "\n".join(
+            f"{i:>2}. {r['Номенклатура']}"
+            + (f" (арт. {r['Артикул']})" if r.get("Артикул") else "")
+            + f" — {r['Заказать']} шт."
+            for i, r in enumerate(items, 1)
+        )
+        total = sum(r["Сумма (по посл. цене)"] or 0 for r in items)
+        total_str = f"{total:,.2f}".replace(",", " ").replace(".", ",")
+        total_line = f"\n\nОриентировочная сумма (по последней цене закупки): {total_str} ₽." if total else ""
+        letters[supplier] = (
+            f"Тема: Заявка на поставку\n\n"
+            f"Здравствуйте!\n\n"
+            f"Просим сообщить наличие и подготовить счёт на следующие позиции:\n\n"
+            f"{rows}"
+            f"{total_line}\n\n"
+            f"Просим уточнить сроки поставки.\n\n"
+            f"С уважением,\n{sender or '[укажите имя и контакты]'}"
+        )
+    return letters

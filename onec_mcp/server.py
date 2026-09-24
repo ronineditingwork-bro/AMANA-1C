@@ -244,6 +244,39 @@ def reorder_suggestion(
     return result
 
 
+@mcp.tool()
+def supplier_order_letters(
+    sales_days: int = 90,
+    lead_days: int = 14,
+    cover_days: int = 30,
+    warehouse: str | None = None,
+    supplier: str | None = None,
+    sender: str | None = None,
+) -> dict[str, Any]:
+    """Черновики писем поставщикам по той же заявке, что reorder_suggestion (те же параметры).
+    Только готовит текст для копирования в почту — ничего не отправляет и не создаёт в 1С.
+    Каждое письмо сохраняется отдельным .txt в exports/, полный текст всех писем — в ответе."""
+    try:
+        client = _client()
+        result = analytics.reorder_suggestion(
+            client, analytics.Directory(client), date.today(), sales_days, lead_days, cover_days, warehouse, supplier
+        )
+    except (ODataError, ValueError) as e:
+        return _error(e)
+    letters = analytics.supplier_letters(result["строки"], sender)
+    if not letters:
+        return {"письма": "по текущим параметрам заказывать нечего"}
+    EXPORT_DIR.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M")
+    files = {}
+    for name, text in letters.items():
+        safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in name)[:60].strip() or "поставщик"
+        path = EXPORT_DIR / f"письмо_{safe}_{stamp}.txt"
+        path.write_text(text, encoding="utf-8")
+        files[name] = str(path)
+    return {"поставщиков": len(letters), "файлы": files, "письма": letters}
+
+
 def main() -> None:
     mcp.run()
 
