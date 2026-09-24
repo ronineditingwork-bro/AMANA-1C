@@ -5,10 +5,13 @@ from __future__ import annotations
 import os
 from datetime import date, datetime
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
 EMPTY_REF = "00000000-0000-0000-0000-000000000000"
+_SAFE_QUERY = "$',():"
+_SAFE_PATH = "/(),=':$"
 
 
 class ODataError(RuntimeError):
@@ -57,8 +60,11 @@ class ODataClient:
     def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         query = {"$format": "json"}
         query.update({k: v for k, v in (params or {}).items() if v is not None})
+        # Строку запроса собираем сами: httpx кодирует пробел как «+», а 1С понимает только %20
+        # и тогда молча теряет часть условия $filter.
+        query_string = "&".join(f"{k}={quote(str(v), safe=_SAFE_QUERY)}" for k, v in query.items())
         try:
-            response = self._http.get(self.base_url + path, params=query)
+            response = self._http.get(f"{self.base_url}{quote(path, safe=_SAFE_PATH)}?{query_string}")
         except httpx.HTTPError as e:
             raise ODataError(f"Нет связи с 1С ({self.base_url}): {e}") from e
         if response.status_code == 401:
