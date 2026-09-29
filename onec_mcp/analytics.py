@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Iterable
 from urllib.parse import quote
 
@@ -374,6 +374,30 @@ def recent_customer_orders(client: ODataClient, directory: Directory, limit: int
         {
             "Номер": r.get("Number"),
             "Дата": (r.get("Date") or "")[:10],
+            "Клиент": directory.partner_name(r.get("Партнер_Key")),
+            "Статус": r.get("Статус") or ("Проведён" if r.get("Posted") else "Не проведён"),
+            "Сумма": round(_num(r.get("СуммаДокумента")), 2),
+        }
+        for r in rows
+    ]
+
+
+def orders_since(client: ODataClient, directory: Directory, since: datetime | None, limit: int = 200) -> list[dict]:
+    """Заказы клиентов, созданные строго после since (по дате документа), от старых к новым —
+    для уведомлений о новых заказах. since=None вернёт последние limit заказов без фильтра."""
+    flt = f"Date gt {dt_literal(since)}" if since else None
+    rows = client.query(
+        "Document_ЗаказКлиента",
+        filter=flt,
+        select="Ref_Key,Number,Date,Партнер_Key,Статус,СуммаДокумента,Posted",
+        orderby="Date",
+        top=limit,
+    )
+    return [
+        {
+            "Ref_Key": r.get("Ref_Key"),
+            "Номер": r.get("Number"),
+            "Дата": r.get("Date"),
             "Клиент": directory.partner_name(r.get("Партнер_Key")),
             "Статус": r.get("Статус") or ("Проведён" if r.get("Posted") else "Не проведён"),
             "Сумма": round(_num(r.get("СуммаДокумента")), 2),
