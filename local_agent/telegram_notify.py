@@ -74,15 +74,32 @@ def send_telegram(http: httpx.Client, text: str) -> None:
         log.warning("Telegram отклонил сообщение (%s): %s", resp.status_code, resp.text[:300])
 
 
+MAX_ITEMS_SHOWN = 30
+
+
 def format_order(order: dict) -> str:
     sum_str = f"{order['Сумма']:,.2f}".replace(",", " ").replace(".", ",")
-    return (
+    text = (
         f"Новый заказ клиента №{order['Номер']}\n"
         f"Дата: {order['Дата'][:16].replace('T', ' ')}\n"
         f"Клиент: {order['Клиент']}\n"
         f"Сумма: {sum_str} ₽\n"
         f"Статус: {order['Статус']}"
     )
+    items = order.get("Позиции") or []
+    if items:
+
+        def fmt_qty(q: float) -> str:
+            return str(int(q)) if q == int(q) else f"{q:g}"
+
+        lines = "\n".join(
+            f"{i}. {it['Номенклатура']} — {fmt_qty(it['Количество'])} шт."
+            for i, it in enumerate(items[:MAX_ITEMS_SHOWN], 1)
+        )
+        if len(items) > MAX_ITEMS_SHOWN:
+            lines += f"\n... и ещё {len(items) - MAX_ITEMS_SHOWN} позиций"
+        text += f"\n\nТовары:\n{lines}"
+    return text
 
 
 def main() -> None:
@@ -110,7 +127,7 @@ def main() -> None:
                 since = datetime.now() - timedelta(hours=LOOKBACK_HOURS)
                 client = ODataClient.from_env()
                 directory = analytics.Directory(client)
-                orders = analytics.orders_since(client, directory, since, limit=500)
+                orders = analytics.orders_since(client, directory, since, limit=500, with_items=True)
 
                 for order in orders:
                     ref = order["Ref_Key"]

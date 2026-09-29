@@ -382,19 +382,28 @@ def recent_customer_orders(client: ODataClient, directory: Directory, limit: int
     ]
 
 
-def orders_since(client: ODataClient, directory: Directory, since: datetime | None, limit: int = 200) -> list[dict]:
+def orders_since(
+    client: ODataClient, directory: Directory, since: datetime | None, limit: int = 200, with_items: bool = False
+) -> list[dict]:
     """Заказы клиентов, созданные строго после since (по дате документа), от старых к новым —
-    для уведомлений о новых заказах. since=None вернёт последние limit заказов без фильтра."""
+    для уведомлений о новых заказах. since=None вернёт последние limit заказов без фильтра.
+    with_items=True добавляет к каждому заказу список позиций (товар, количество, сумма)."""
     flt = f"Date gt {dt_literal(since)}" if since else None
-    rows = client.query(
-        "Document_ЗаказКлиента",
-        filter=flt,
-        select="Ref_Key,Number,Date,Партнер_Key,Статус,СуммаДокумента,Posted",
-        orderby="Date",
-        top=limit,
-    )
-    return [
-        {
+    base_select = "Ref_Key,Number,Date,Партнер_Key,Статус,СуммаДокумента,Posted"
+    if with_items:
+        try:
+            rows = client.query(
+                "Document_ЗаказКлиента", filter=flt, select=f"{base_select},Товары", orderby="Date", top=limit
+            )
+        except ODataError:
+            # Не все версии конфигурации отдают табличную часть через $select — берём документ целиком.
+            rows = client.query("Document_ЗаказКлиента", filter=flt, orderby="Date", top=limit)
+    else:
+        rows = client.query("Document_ЗаказКлиента", filter=flt, select=base_select, orderby="Date", top=limit)
+
+    result = []
+    for r in rows:
+        order = {
             "Ref_Key": r.get("Ref_Key"),
             "Номер": r.get("Number"),
             "Дата": r.get("Date"),
@@ -402,5 +411,14 @@ def orders_since(client: ODataClient, directory: Directory, since: datetime | No
             "Статус": r.get("Статус") or ("Проведён" if r.get("Posted") else "Не проведён"),
             "Сумма": round(_num(r.get("СуммаДокумента")), 2),
         }
-        for r in rows
-    ]
+        if with_items:
+            order["Позиции"] = [
+                {
+                    **directory.item_info(row.get("Номенклатура_Key")),
+                    "Количество": round(_num(row.get("Количество")), 3),
+                    "Сумма": round(_num(row.get("Сумма")), 2),
+                }
+                for row in (r.get("Товары") or [])
+            ]
+        result.append(order)
+    return result
