@@ -1,15 +1,21 @@
 """Уведомления в Telegram о новых заказах клиентов в 1С.
 
 Работает независимо от cloud_api/agent.py: сам, исходящим соединением, раз в несколько секунд
-спрашивает у 1С «есть новые заказы с прошлого раза?» и, если есть, шлёт сообщение в Telegram —
-тоже исходящим соединением (Telegram Bot API сам по себе в облаке). Ни один порт на офисном
-роутере открывать не нужно.
+спрашивает у 1С «какие заказы есть за последние NOTIFY_LOOKBACK_HOURS часов?» и шлёт сообщение
+по каждому, которого ещё не видел. Ни один порт на офисном роутере открывать не нужно —
+и к 1С, и к Telegram обращается сама, исходящим соединением.
 
 Запуск:  python local_agent/telegram_notify.py
-Остановить: Ctrl+C.
+Остановить: Ctrl+C (или снять службу — см. README.md).
 
-При первом запуске ничего не присылает (чтобы не завалить чат всей историей заказов), только
-запоминает текущий момент как точку отсчёта. Уведомления придут по заказам, созданным после этого.
+При первом запуске ничего не присылает (чтобы не завалить чат старыми заказами), только
+запоминает уже существующие заказы за последнее окно как увиденные.
+
+Почему по списку «увиденных», а не просто «дата больше последней увиденной»: дата документа
+в 1С — это не всегда момент, когда заказ реально появился в базе (например, розничная продажа
+может синхронизироваться в 1С с задержкой и получить дату из прошлого). Если сравнивать только
+даты, такой запоздавший заказ никогда не пройдёт проверку. Поэтому вместо одной даты храним
+список ID заказов, увиденных за последние NOTIFY_LOOKBACK_HOURS часов, и сравниваем по ним.
 """
 
 from __future__ import annotations
@@ -19,7 +25,7 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -37,16 +43,25 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 API_BASE = os.environ.get("TELEGRAM_API_BASE", "https://api.telegram.org")
 POLL_SECONDS = float(os.environ.get("NOTIFY_POLL_SECONDS", "60"))
+LOOKBACK_HOURS = float(os.environ.get("NOTIFY_LOOKBACK_HOURS", "48"))
 STATE_PATH = ROOT / "local_agent" / "notify_state.json"
+LOG_PATH = ROOT / "local_agent" / "telegram_notify.log"
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [notify] %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [notify] %(message)s",
+    handlers=[logging.FileHandler(LOG_PATH, encoding="utf-8"), logging.StreamHandler()],
+)
 log = logging.getLogger("notify")
 
 
 def load_state() -> dict:
     if STATE_PATH.exists():
-        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
-    return {}
+        try:
+            return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            log.warning("notify_state.json повреждён, начинаю заново.")
+    return {"seen": {}}
 
 
 def save_state(state: dict) -> None:
@@ -79,26 +94,38 @@ def main() -> None:
         )
 
     state = load_state()
+    first_run = not state.get("seen")
+
     with httpx.Client(timeout=30) as http:
-        if "last_order_date" not in state:
-            # Первый запуск: не шлём историю, просто запоминаем текущий момент.
-            state["last_order_date"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            save_state(state)
-            log.info("Первый запуск: беру за точку отсчёта текущий момент, старые заказы не шлю.")
+        if first_run:
+            log.info("Первый запуск: запоминаю уже существующие заказы за окно, не отправляя их.")
             send_telegram(http, "Бот запущен. Буду присылать уведомления о новых заказах клиентов.")
 
-        log.info("Слежу за новыми заказами, опрос раз в %.0f сек.", POLL_SECONDS)
+        log.info(
+            "Слежу за новыми заказами (окно %.0f ч.), опрос раз в %.0f сек.", LOOKBACK_HOURS, POLL_SECONDS
+        )
         while True:
             try:
+                # Время местное (как и остальные даты в 1С), не UTC — иначе сравнение дат "поплывёт".
+                since = datetime.now() - timedelta(hours=LOOKBACK_HOURS)
                 client = ODataClient.from_env()
                 directory = analytics.Directory(client)
-                since = datetime.fromisoformat(state["last_order_date"])
-                orders = analytics.orders_since(client, directory, since)
+                orders = analytics.orders_since(client, directory, since, limit=500)
+
                 for order in orders:
-                    send_telegram(http, format_order(order))
-                    log.info("Отправлено уведомление: заказ №%s", order["Номер"])
-                    state["last_order_date"] = order["Дата"]
-                    save_state(state)
+                    ref = order["Ref_Key"]
+                    if ref in state["seen"]:
+                        continue
+                    if not first_run:
+                        send_telegram(http, format_order(order))
+                        log.info("Отправлено уведомление: заказ №%s", order["Номер"])
+                    state["seen"][ref] = order["Дата"]
+
+                # Не даём списку увиденных расти бесконечно: оставляем только то, что ещё в окне.
+                cutoff = since.isoformat()
+                state["seen"] = {k: v for k, v in state["seen"].items() if v >= cutoff}
+                save_state(state)
+                first_run = False
             except ODataError as e:
                 log.warning("Нет связи с 1С: %s", e)
             except httpx.HTTPError as e:

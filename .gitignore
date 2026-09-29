@@ -6,3 +6,4 @@ venv/
 exports/
 cloud_api/tasks.db
 local_agent/notify_state.json
+local_agent/telegram_notify.log
