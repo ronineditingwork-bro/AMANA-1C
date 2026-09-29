@@ -121,12 +121,22 @@ def main() -> None:
         log.info(
             "Слежу за новыми заказами (окно %.0f ч.), опрос раз в %.0f сек.", LOOKBACK_HOURS, POLL_SECONDS
         )
+        client = ODataClient.from_env()
+        directory = analytics.Directory(client)
+        directory_built_at = datetime.now()
+
         while True:
             try:
+                # Directory кэширует справочник номенклатуры у себя — без этого он перекачивался бы
+                # целиком на каждой проверке. Пересоздаём раз в несколько часов, чтобы видеть новые
+                # товары, а не при каждом опросе.
+                if datetime.now() - directory_built_at > timedelta(hours=6):
+                    client = ODataClient.from_env()
+                    directory = analytics.Directory(client)
+                    directory_built_at = datetime.now()
+
                 # Время местное (как и остальные даты в 1С), не UTC — иначе сравнение дат "поплывёт".
                 since = datetime.now() - timedelta(hours=LOOKBACK_HOURS)
-                client = ODataClient.from_env()
-                directory = analytics.Directory(client)
                 orders = analytics.orders_since(client, directory, since, limit=500, with_items=True)
 
                 for order in orders:
