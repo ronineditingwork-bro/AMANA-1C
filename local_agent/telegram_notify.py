@@ -56,12 +56,17 @@ log = logging.getLogger("notify")
 
 
 def load_state() -> dict:
+    state: dict = {}
     if STATE_PATH.exists():
         try:
-            return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+            state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             log.warning("notify_state.json повреждён, начинаю заново.")
-    return {"seen": {}}
+    # Файл от старой версии программы (только last_order_date, без seen) — переходим на новый
+    # формат, не считая это первым запуском и не теряя last_order_date как подсказку.
+    if "seen" not in state:
+        state["seen"] = {}
+    return state
 
 
 def save_state(state: dict) -> None:
@@ -157,6 +162,10 @@ def main() -> None:
                 log.warning("Нет связи с 1С: %s", e)
             except httpx.HTTPError as e:
                 log.warning("Нет связи с Telegram: %s", e)
+            except Exception:
+                # Любая другая неожиданная ошибка не должна останавливать программу насовсем —
+                # раньше такая ошибка тихо убивала процесс, и уведомления пропадали без следа.
+                log.exception("Неожиданная ошибка в цикле проверки, пробую снова через %.0f сек.", POLL_SECONDS)
             time.sleep(POLL_SECONDS)
 
 
