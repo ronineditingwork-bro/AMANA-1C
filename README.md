@@ -122,4 +122,17 @@
 powershell -ExecutionPolicy Bypass -File scripts\install_telegram_service.ps1
 ```
 Снять: `powershell -ExecutionPolicy Bypass -File scripts\uninstall_telegram_service.ps1`.
-Проверить, что работает: `Get-ScheduledTask -TaskName "AMANA-1C Telegram Notify" | Get-ScheduledTaskInfo`.
+Проверить, что работает: `Get-ScheduledTask -TaskName "AMANA-1C Telegram Notify" | Get-ScheduledTaskInfo`
+(`LastTaskResult` `0` или `267009` — оба значат «работает без ошибок»; `267009` означает «задача
+выполняется прямо сейчас», это ожидаемо для программы, которая не завершается).
+
+**Требует запуска от имени администратора** — иначе `Register-ScheduledTask` откажет в доступе.
+
+Если `python` у вас разрешается в заглушку Microsoft Store
+(`...\AppData\Local\Microsoft\WindowsApps\python.exe` — проверить: `(Get-Command python).Source`),
+скрипт сам найдёт настоящий `python.exe` в `%LOCALAPPDATA%\Python`. Если не найдёт — укажите путь
+явно: `... -File scripts\install_telegram_service.ps1 -PythonExe C:\путь\к\python.exe`.
+
+**Осторожно:** `copy X.example X.env` перезаписывает файл без предупреждения, даже если он уже
+заполнен. Прежде чем копировать образец поверх существующего `.env`, откройте файл и убедитесь,
+что в нём ещё нет ваших настроек — иначе придётся заполнять заново.

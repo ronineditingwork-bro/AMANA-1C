@@ -7,6 +7,11 @@
 #
 # Pered etim local_agent\.env dolzhen byt zapolnen (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID) -
 # sm. README.md, razdel "Uvedomleniya v Telegram o novykh zakazakh".
+# Trebuet zapuska ot imeni administratora (Register-ScheduledTask inache otkazyvaet v dostupe).
+
+param(
+    [string]$PythonExe
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -21,10 +26,28 @@ if (-not (Test-Path $envFile)) {
     exit 1
 }
 
-$pythonExe = (Get-Command python -ErrorAction SilentlyContinue).Source
+$pythonExe = $PythonExe
+if (-not $pythonExe) {
+    $pythonExe = (Get-Command python -ErrorAction SilentlyContinue).Source
+}
 if (-not $pythonExe) {
     Write-Host "Ne nayden python v PATH. Ustanovite Python i povtorite."
     exit 1
+}
+if ($pythonExe -like "*\WindowsApps\python.exe") {
+    # Eto zaglushka Microsoft Store, ona ne rabotaet nadezhno vnutri Planirovshchika
+    # zadanii. Ishchem nastoyashchiy python.exe ryadom (obychno v AppData\Local\Python).
+    $real = Get-ChildItem "$env:LOCALAPPDATA\Python" -Filter python.exe -Recurse -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($real) {
+        $pythonExe = $real.FullName
+    } else {
+        Write-Host "Nayden tolko yarlyk Python iz Microsoft Store (WindowsApps), on ne podkhodit dlya sluzhby."
+        Write-Host "Nastoyashchiy python.exe ne nayden avtomaticheski v $env:LOCALAPPDATA\Python."
+        Write-Host "Zapustite skript s parametrom -PythonExe i ukazhite put yavno, naprimer:"
+        Write-Host "  powershell -ExecutionPolicy Bypass -File scripts\install_telegram_service.ps1 -PythonExe C:\Path\To\python.exe"
+        exit 1
+    }
 }
 
 $action = New-ScheduledTaskAction -Execute $pythonExe -Argument "local_agent\telegram_notify.py" -WorkingDirectory $projectRoot
