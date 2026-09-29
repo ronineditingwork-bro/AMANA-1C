@@ -114,3 +114,12 @@
    все новые заказы будут приходить сообщением.
 
 Заказы, уже созданные до запуска, не присылаются — только новые, начиная с момента запуска.
+
+**Чтобы не запускать вручную и не терять уведомления при закрытии окна PowerShell** — поставьте
+как задачу Планировщика заданий Windows: работает в фоне, запускается сама при входе в Windows,
+сама перезапускается, если упадёт.
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_telegram_service.ps1
+```
+Снять: `powershell -ExecutionPolicy Bypass -File scripts\uninstall_telegram_service.ps1`.
+Проверить, что работает: `Get-ScheduledTask -TaskName "AMANA-1C Telegram Notify" | Get-ScheduledTaskInfo`.
