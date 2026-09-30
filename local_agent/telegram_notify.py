@@ -8,6 +8,13 @@
 Запуск:  python local_agent/telegram_notify.py
 Остановить: Ctrl+C (или снять службу — см. README.md).
 
+Несколько магазинов/баз 1С: запустите с именем папки в local_agent/stores/, например
+  python local_agent/telegram_notify.py aerodromnaya
+Настройки берутся из local_agent/stores/<имя>/.env (своя 1С, свой Telegram или тот же — по
+желанию), состояние и лог хранятся там же, отдельно от других магазинов. В сообщениях будет
+указано название магазина (STORE_NAME из этого .env). Без аргумента — старое поведение, как было
+до многомагазинной поддержки: настройки из local_agent/.env, без названия магазина в сообщении.
+
 При первом запуске ничего не присылает (чтобы не завалить чат старыми заказами), только
 запоминает уже существующие заказы за последнее окно как увиденные.
 
@@ -33,19 +40,34 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+STORE = sys.argv[1] if len(sys.argv) > 1 else None
+if STORE:
+    STORE_DIR = ROOT / "local_agent" / "stores" / STORE
+    if not (STORE_DIR / ".env").exists():
+        raise SystemExit(
+            f"Не найден {STORE_DIR / '.env'}. Создайте его по образцу "
+            f"local_agent/stores/{STORE}/.env.example (или скопируйте другой магазин)."
+        )
+    load_dotenv(STORE_DIR / ".env", override=True)  # свои настройки магазина — приоритет
+    STATE_PATH = STORE_DIR / "notify_state.json"
+    LOG_PATH = STORE_DIR / "telegram_notify.log"
+else:
+    STATE_PATH = ROOT / "local_agent" / "notify_state.json"
+    LOG_PATH = ROOT / "local_agent" / "telegram_notify.log"
+# Общие/старые настройки — как запасной вариант для того, чего нет в .env магазина.
 load_dotenv(ROOT / "local_agent" / ".env")
 load_dotenv(ROOT / ".env")  # настройки самой 1С (ONEC_ODATA_URL и т.д.)
 
 from onec_mcp import analytics  # noqa: E402
 from onec_mcp.odata import ODataClient, ODataError  # noqa: E402
 
+STORE_NAME = os.environ.get("STORE_NAME")
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 API_BASE = os.environ.get("TELEGRAM_API_BASE", "https://api.telegram.org")
 POLL_SECONDS = float(os.environ.get("NOTIFY_POLL_SECONDS", "60"))
 LOOKBACK_HOURS = float(os.environ.get("NOTIFY_LOOKBACK_HOURS", "48"))
-STATE_PATH = ROOT / "local_agent" / "notify_state.json"
-LOG_PATH = ROOT / "local_agent" / "telegram_notify.log"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -84,7 +106,9 @@ MAX_ITEMS_SHOWN = 30
 
 def format_order(order: dict) -> str:
     sum_str = f"{order['Сумма']:,.2f}".replace(",", " ").replace(".", ",")
+    store_line = f"Магазин: {STORE_NAME}\n" if STORE_NAME else ""
     text = (
+        f"{store_line}"
         f"Новый заказ клиента №{order['Номер']}\n"
         f"Дата: {order['Дата'][:16].replace('T', ' ')}\n"
         f"Клиент: {order['Клиент']}\n"
@@ -122,7 +146,8 @@ def main() -> None:
     with httpx.Client(timeout=30) as http:
         if first_run:
             log.info("Первый запуск: запоминаю уже существующие заказы за окно, не отправляя их.")
-            send_telegram(http, "Бот запущен. Буду присылать уведомления о новых заказах клиентов.")
+            started = f"Бот запущен ({STORE_NAME})." if STORE_NAME else "Бот запущен."
+            send_telegram(http, f"{started} Буду присылать уведомления о новых заказах клиентов.")
 
         log.info(
             "Слежу за новыми заказами (окно %.0f ч.), опрос раз в %.0f сек.", LOOKBACK_HOURS, POLL_SECONDS

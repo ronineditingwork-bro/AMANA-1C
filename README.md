@@ -136,3 +136,32 @@ powershell -ExecutionPolicy Bypass -File scripts\install_telegram_service.ps1
 **Осторожно:** `copy X.example X.env` перезаписывает файл без предупреждения, даже если он уже
 заполнен. Прежде чем копировать образец поверх существующего `.env`, откройте файл и убедитесь,
 что в нём ещё нет ваших настроек — иначе придётся заполнять заново.
+
+## Несколько магазинов (разные базы 1С)
+
+Каждый магазин со своей базой 1С получает свою собственную папку `local_agent/stores/<имя>/`
+со своим `.env` (свой адрес 1С, свой Telegram-токен или тот же общий), своим состоянием и логом —
+магазины работают полностью независимо друг от друга, даже если запущены на одном компьютере.
+
+1. Создайте папку и настройки:
+   ```powershell
+   copy local_agent\stores\aerodromnaya\.env.example local_agent\stores\aerodromnaya\.env
+   notepad local_agent\stores\aerodromnaya\.env
+   ```
+   (для второго магазина — так же, в папке `local_agent\stores\babushkina\`).
+2. Впишите `ONEC_ODATA_URL`/`ONEC_USER`/`ONEC_PASSWORD` для базы этого магазина и `STORE_NAME`
+   (попадёт в текст сообщения). Токен и chat_id Telegram можно сделать свои на каждый магазин,
+   а можно один общий на оба — тогда уведомления будут в одном чате, с пометкой «Магазин: ...».
+3. Проверка вручную: `python local_agent\telegram_notify.py aerodromnaya` (вместо `aerodromnaya` —
+   имя папки). Для постоянной работы в фоне — служба, как для одного магазина, но с параметром
+   `-Store` (от имени администратора):
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\install_telegram_service.ps1 -Store aerodromnaya -PythonExe C:\путь\к\python.exe
+   ```
+   Снять: `... -File scripts\uninstall_telegram_service.ps1 -Store aerodromnaya`.
+   Для второго магазина — то же самое с `babushkina`. Получатся две отдельные службы в
+   Планировщике заданий («AMANA-1C Telegram Notify - aerodromnaya» и «... - babushkina»),
+   независимые друг от друга.
+
+Запуск `python local_agent\telegram_notify.py` **без** имени магазина — старое поведение (для
+одного магазина), использует общие `local_agent/.env` и `local_agent/notify_state.json` напрямую.

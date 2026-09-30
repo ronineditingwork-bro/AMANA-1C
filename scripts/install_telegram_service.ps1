@@ -2,27 +2,46 @@
 # zapuskaetsya sama pri vkhode v Windows, rabotaet v fone bez otkrytogo okna,
 # sama perezapuskaetsya raz v minutu, esli vdrug upadet (naprimer, propadet svyaz s 1C).
 #
-# Zapuskat odin raz, iz papki AMANA-1C:
+# Odin magazin (staroe povedenie, local_agent\.env):
 #   powershell -ExecutionPolicy Bypass -File scripts\install_telegram_service.ps1
 #
-# Pered etim local_agent\.env dolzhen byt zapolnen (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID) -
+# Neskolko magazinov/baz 1C: ukazhite imya papki v local_agent\stores\ -
+# nastroyki berutsya iz local_agent\stores\<imya>\.env, sozdaetsya otdelnaya sluzhba:
+#   powershell -ExecutionPolicy Bypass -File scripts\install_telegram_service.ps1 -Store aerodromnaya
+#
+# Pered etim nuzhnyy .env dolzhen byt zapolnen (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, dlya
+# magazina eshche ONEC_ODATA_URL/ONEC_USER/ONEC_PASSWORD i STORE_NAME) -
 # sm. README.md, razdel "Uvedomleniya v Telegram o novykh zakazakh".
 # Trebuet zapuska ot imeni administratora (Register-ScheduledTask inache otkazyvaet v dostupe).
 
 param(
-    [string]$PythonExe
+    [string]$PythonExe,
+    [string]$Store
 )
 
 $ErrorActionPreference = "Stop"
 
-$taskName = "AMANA-1C Telegram Notify"
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$envFile = Join-Path $projectRoot "local_agent\.env"
+
+if ($Store) {
+    $taskName = "AMANA-1C Telegram Notify - $Store"
+    $envFile = Join-Path $projectRoot "local_agent\stores\$Store\.env"
+    $scriptArgs = "local_agent\telegram_notify.py $Store"
+} else {
+    $taskName = "AMANA-1C Telegram Notify"
+    $envFile = Join-Path $projectRoot "local_agent\.env"
+    $scriptArgs = "local_agent\telegram_notify.py"
+}
 
 if (-not (Test-Path $envFile)) {
-    Write-Host "Ne nayden local_agent\.env. Snachala nastroyte bota:"
-    Write-Host "  copy local_agent\.env.example local_agent\.env"
-    Write-Host "  notepad local_agent\.env"
+    Write-Host "Ne nayden $envFile. Snachala nastroyte:"
+    if ($Store) {
+        Write-Host "  copy local_agent\stores\$Store\.env.example local_agent\stores\$Store\.env"
+        Write-Host "  notepad local_agent\stores\$Store\.env"
+    } else {
+        Write-Host "  copy local_agent\.env.example local_agent\.env"
+        Write-Host "  notepad local_agent\.env"
+    }
     exit 1
 }
 
@@ -50,7 +69,7 @@ if ($pythonExe -like "*\WindowsApps\python.exe") {
     }
 }
 
-$action = New-ScheduledTaskAction -Execute $pythonExe -Argument "local_agent\telegram_notify.py" -WorkingDirectory $projectRoot
+$action = New-ScheduledTaskAction -Execute $pythonExe -Argument $scriptArgs -WorkingDirectory $projectRoot
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 
 $settingsParams = @{
@@ -79,5 +98,9 @@ Start-ScheduledTask -TaskName $taskName
 Write-Host ""
 Write-Host "Gotovo: sluzhba '$taskName' sozdana i zapushchena."
 Write-Host "Teper budet zapuskatsya sama pri kazhdom vkhode v Windows."
-Write-Host "Proverit status: Get-ScheduledTask -TaskName ""AMANA-1C Telegram Notify"" | Get-ScheduledTaskInfo"
-Write-Host "Snyat sovsem: powershell -ExecutionPolicy Bypass -File scripts\uninstall_telegram_service.ps1"
+Write-Host "Proverit status: Get-ScheduledTask -TaskName ""$taskName"" | Get-ScheduledTaskInfo"
+if ($Store) {
+    Write-Host "Snyat sovsem: powershell -ExecutionPolicy Bypass -File scripts\uninstall_telegram_service.ps1 -Store $Store"
+} else {
+    Write-Host "Snyat sovsem: powershell -ExecutionPolicy Bypass -File scripts\uninstall_telegram_service.ps1"
+}

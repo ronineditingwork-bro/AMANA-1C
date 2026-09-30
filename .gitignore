@@ -7,3 +7,5 @@ exports/
 cloud_api/tasks.db
 local_agent/notify_state.json
 local_agent/telegram_notify.log
+local_agent/stores/*/notify_state.json
+local_agent/stores/*/telegram_notify.log
