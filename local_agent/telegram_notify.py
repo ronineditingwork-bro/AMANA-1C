@@ -88,6 +88,7 @@ def format_order(order: dict) -> str:
         f"Новый заказ клиента №{order['Номер']}\n"
         f"Дата: {order['Дата'][:16].replace('T', ' ')}\n"
         f"Клиент: {order['Клиент']}\n"
+        f"Менеджер: {order['Менеджер']}\n"
         f"Сумма: {sum_str} ₽\n"
         f"Статус: {order['Статус']}"
     )

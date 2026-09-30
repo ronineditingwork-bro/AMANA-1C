@@ -49,6 +49,9 @@ class Directory:
     def partners(self) -> dict[str, dict]:
         return self._load("Catalog_Партнеры", "Ref_Key,Description")
 
+    def users(self) -> dict[str, dict]:
+        return self._load("Catalog_Пользователи", "Ref_Key,Description")
+
     def item_info(self, key: str) -> dict:
         row = self.items().get(key, {})
         return {
@@ -61,6 +64,11 @@ class Directory:
         if not key or key == EMPTY_REF:
             return "(не указан)"
         return self.partners().get(key, {}).get("Description") or key
+
+    def user_name(self, key: str | None) -> str:
+        if not key or key == EMPTY_REF:
+            return "(не указан)"
+        return self.users().get(key, {}).get("Description") or key
 
     def warehouse_name(self, key: str | None) -> str:
         if not key or key == EMPTY_REF:
@@ -389,25 +397,27 @@ def orders_since(
     для уведомлений о новых заказах. since=None вернёт последние limit заказов без фильтра.
     with_items=True добавляет к каждому заказу список позиций (товар, количество, сумма)."""
     flt = f"Date gt {dt_literal(since)}" if since else None
-    base_select = "Ref_Key,Number,Date,Партнер_Key,Статус,СуммаДокумента,Posted"
-    if with_items:
-        try:
-            rows = client.query(
-                "Document_ЗаказКлиента", filter=flt, select=f"{base_select},Товары", orderby="Date", top=limit
-            )
-        except ODataError:
-            # Не все версии конфигурации отдают табличную часть через $select — берём документ целиком.
-            rows = client.query("Document_ЗаказКлиента", filter=flt, orderby="Date", top=limit)
-    else:
-        rows = client.query("Document_ЗаказКлиента", filter=flt, select=base_select, orderby="Date", top=limit)
+    base_select = "Ref_Key,Number,Date,Партнер_Key,Статус,СуммаДокумента,Posted,Менеджер_Key,Менеджер2_Key"
+    select = f"{base_select},Товары" if with_items else base_select
+    try:
+        rows = client.query("Document_ЗаказКлиента", filter=flt, select=select, orderby="Date", top=limit)
+    except ODataError:
+        # Поля "Менеджер"/"Менеджер2" или табличная часть через $select не поддерживаются в этой
+        # конфигурации — берём документ целиком, недостающие поля просто не заполнятся.
+        rows = client.query("Document_ЗаказКлиента", filter=flt, orderby="Date", top=limit)
 
     result = []
     for r in rows:
+        manager = directory.user_name(r.get("Менеджер_Key"))
+        manager2_key = r.get("Менеджер2_Key")
+        if manager2_key and manager2_key != EMPTY_REF and manager2_key != r.get("Менеджер_Key"):
+            manager += f" / {directory.user_name(manager2_key)}"
         order = {
             "Ref_Key": r.get("Ref_Key"),
             "Номер": r.get("Number"),
             "Дата": r.get("Date"),
             "Клиент": directory.partner_name(r.get("Партнер_Key")),
+            "Менеджер": manager,
             "Статус": r.get("Статус") or ("Проведён" if r.get("Posted") else "Не проведён"),
             "Сумма": round(_num(r.get("СуммаДокумента")), 2),
         }
