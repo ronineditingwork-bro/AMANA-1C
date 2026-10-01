@@ -9,3 +9,5 @@ local_agent/notify_state.json
 local_agent/telegram_notify.log
 local_agent/stores/*/notify_state.json
 local_agent/stores/*/telegram_notify.log
+local_agent/daily_payments.log
+local_agent/stores/*/daily_payments.log

@@ -52,6 +52,9 @@ class Directory:
     def users(self) -> dict[str, dict]:
         return self._load("Catalog_Пользователи", "Ref_Key,Description")
 
+    def contractors(self) -> dict[str, dict]:
+        return self._load("Catalog_Контрагенты", "Ref_Key,Description")
+
     def item_info(self, key: str) -> dict:
         row = self.items().get(key, {})
         return {
@@ -69,6 +72,22 @@ class Directory:
         if not key or key == EMPTY_REF:
             return "(не указан)"
         return self.users().get(key, {}).get("Description") or key
+
+    def contractor_name(self, key: str | None) -> str:
+        if not key or key == EMPTY_REF:
+            return "(не указан)"
+        return self.contractors().get(key, {}).get("Description") or key
+
+    def order_number(self, key: str | None) -> str | None:
+        """Номер заказа клиента по его Ref_Key — для связи «платёж → заказ». Отдельный запрос
+        на ключ (не кэшируется списком), обычно вызывается нечасто — для нескольких платежей в день."""
+        if not key or key == EMPTY_REF:
+            return None
+        cache = self._cache.setdefault("_order_numbers", {})
+        if key not in cache:
+            rows = self.client.query("Document_ЗаказКлиента", filter=f"Ref_Key eq guid'{key}'", select="Number", top=1)
+            cache[key] = rows[0]["Number"] if rows else None
+        return cache[key]
 
     def warehouse_name(self, key: str | None) -> str:
         if not key or key == EMPTY_REF:
@@ -432,3 +451,72 @@ def orders_since(
             ]
         result.append(order)
     return result
+
+
+# Виды поступления денег, которые проверяет daily_payments. Табличная часть "РасшифровкаПлатежа"
+# у всех трёх одинаковая по смыслу: ОснованиеПлатежа(_Type) — полиморфная ссылка на документ,
+# под который пришла оплата (часто Document_ЗаказКлиента, но может быть и договор, и счёт).
+PAYMENT_SOURCES = (
+    ("Document_ПоступлениеБезналичныхДенежныхСредств", "Банк"),
+    ("Document_ПриходныйКассовыйОрдер", "Касса"),
+    ("Document_ОперацияПоПлатежнойКарте", "Эквайринг"),
+)
+
+
+def daily_payments(client: ODataClient, directory: Directory, day: date) -> dict:
+    """Деньги, поступившие за день (банк + касса + эквайринг), с итогами по видам и расшифровкой
+    по каждому платежу — кто заплатил и по какому заказу клиента, если это видно из документа."""
+    start = datetime(day.year, day.month, day.day)
+    end = start + timedelta(days=1)
+    flt = f"Date ge {dt_literal(start)} and Date lt {dt_literal(end)} and Posted eq true"
+
+    lines: list[dict] = []
+    by_type: dict[str, dict] = {}
+    notes: list[str] = []
+
+    for entity, label in PAYMENT_SOURCES:
+        base_select = "Ref_Key,Number,Date,Контрагент_Key,СуммаДокумента"
+        try:
+            rows = client.query(entity, filter=flt, select=f"{base_select},РасшифровкаПлатежа", orderby="Date")
+        except ODataError:
+            try:
+                # Табличная часть через $select не поддержалась — берём без неё, без связи с заказом.
+                rows = client.query(entity, filter=flt, select=base_select, orderby="Date")
+            except ODataError as e:
+                notes.append(f"{label}: документ недоступен в OData этой базы ({e}).")
+                continue
+
+        type_totals = by_type.setdefault(label, {"документов": 0, "сумма": 0.0})
+        for r in rows:
+            detail_rows = r.get("РасшифровкаПлатежа") or []
+            payer = directory.contractor_name(r.get("Контрагент_Key"))
+            if payer == "(не указан)" and detail_rows:
+                payer = directory.partner_name(detail_rows[0].get("Партнер_Key"))
+
+            order_number = None
+            for row in detail_rows:
+                basis_type = row.get("ОснованиеПлатежа_Type") or ""
+                if "Document_ЗаказКлиента" in basis_type:
+                    order_number = directory.order_number(row.get("ОснованиеПлатежа"))
+                    break
+
+            amount = round(_num(r.get("СуммаДокумента")), 2)
+            type_totals["документов"] += 1
+            type_totals["сумма"] = round(type_totals["сумма"] + amount, 2)
+            lines.append({
+                "Вид": label,
+                "Номер": r.get("Number"),
+                "Дата": r.get("Date"),
+                "Сумма": amount,
+                "Плательщик": payer,
+                "Заказ": order_number,
+            })
+
+    total = round(sum(v["сумма"] for v in by_type.values()), 2)
+    return {
+        "день": day.isoformat(),
+        "итого": total,
+        "по видам": by_type,
+        "строки": sorted(lines, key=lambda x: x["Дата"] or ""),
+        "примечания": notes,
+    }

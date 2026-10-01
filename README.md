@@ -165,3 +165,41 @@ powershell -ExecutionPolicy Bypass -File scripts\install_telegram_service.ps1
 
 Запуск `python local_agent\telegram_notify.py` **без** имени магазина — старое поведение (для
 одного магазина), использует общие `local_agent/.env` и `local_agent/notify_state.json` напрямую.
+
+## Итоги дня: поступления денег (Telegram)
+
+`local_agent/daily_payments.py` — в конце дня присылает в Telegram сводку, сколько денег
+поступило за сегодня: отдельно по банку (безналичные), кассе (наличные) и эквайрингу (оплата
+картой), с итогом и списком платежей (с привязкой к номеру заказа клиента, если он известен).
+В отличие от `telegram_notify.py`, это не постоянно работающая служба, а разовый запуск раз в
+день — Планировщик заданий Windows включает его сам в заданное время.
+
+Использует те же `.env`, что и уведомления о заказах (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
+`ONEC_*`), ничего отдельно настраивать не нужно, если уведомления о заказах уже работают.
+
+**Проверка вручную** (без ожидания времени по расписанию):
+```powershell
+python local_agent\daily_payments.py
+```
+Для конкретного магазина — так же, с именем папки:
+```powershell
+python local_agent\daily_payments.py aerodromnaya
+```
+
+**Поставить на расписание** (от имени администратора), по умолчанию время — 20:00:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_daily_payments_service.ps1 -At 20:00
+```
+Для конкретного магазина — с параметром `-Store` (как и для уведомлений о заказах):
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_daily_payments_service.ps1 -At 20:00 -Store aerodromnaya -PythonExe C:\путь\к\python.exe
+```
+Снять: `powershell -ExecutionPolicy Bypass -File scripts\uninstall_daily_payments_service.ps1` (с
+`-Store aerodromnaya`, если ставили на конкретный магазин).
+
+Если денег за день не поступало — придёт сообщение «Поступлений не зафиксировано», чтобы было
+видно, что служба работает, а не просто молчит.
+
+Если у вашей базы 1С какой-то из трёх видов документов (банк/касса/эквайринг) не опубликован в
+OData или называется иначе — в сообщении об этом будет отдельная строка-примечание, без падения
+всей сводки.
