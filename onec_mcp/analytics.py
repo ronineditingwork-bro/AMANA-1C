@@ -56,7 +56,26 @@ class Directory:
         return self._load("Catalog_Контрагенты", "Ref_Key,Description")
 
     def item_info(self, key: str) -> dict:
-        row = self.items().get(key, {})
+        items = self.items()
+        row = items.get(key)
+        if row is None and key:
+            # Промах кэша — скорее всего товар добавили в 1С уже после того, как Directory
+            # загрузил справочник (кэш обновляется раз в несколько часов). Подтягиваем
+            # конкретную позицию по ключу напрямую, не дожидаясь общего обновления, иначе
+            # в уведомлении вместо названия был бы показан голый GUID.
+            try:
+                rows = self.client.query(
+                    "Catalog_Номенклатура",
+                    filter=f"Ref_Key eq guid'{key}'",
+                    select="Ref_Key,Code,Description,Артикул,IsFolder,ТипНоменклатуры",
+                    top=1,
+                )
+            except ODataError:
+                rows = []
+            if rows:
+                row = rows[0]
+                items[key] = row
+        row = row or {}
         return {
             "Код": row.get("Code"),
             "Артикул": row.get("Артикул"),
