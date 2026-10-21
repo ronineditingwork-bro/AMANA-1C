@@ -472,6 +472,45 @@ def orders_since(
     return result
 
 
+def order_by_number(client: ODataClient, directory: Directory, number: str, with_items: bool = True) -> dict | None:
+    """Заказ клиента по его номеру (как показывается в 1С, например «00УТ-000482») — для ручной
+    перепроверки/переотправки конкретного заказа. None, если номер не найден."""
+    base_select = "Ref_Key,Number,Date,Партнер_Key,Статус,СуммаДокумента,Posted,Менеджер_Key,Менеджер2_Key"
+    select = f"{base_select},Товары" if with_items else base_select
+    try:
+        rows = client.query(
+            "Document_ЗаказКлиента", filter=f"Number eq '{number}'", select=select, top=1
+        )
+    except ODataError:
+        rows = client.query("Document_ЗаказКлиента", filter=f"Number eq '{number}'", top=1)
+    if not rows:
+        return None
+    r = rows[0]
+    manager = directory.user_name(r.get("Менеджер_Key"))
+    manager2_key = r.get("Менеджер2_Key")
+    if manager2_key and manager2_key != EMPTY_REF and manager2_key != r.get("Менеджер_Key"):
+        manager += f" / {directory.user_name(manager2_key)}"
+    order = {
+        "Ref_Key": r.get("Ref_Key"),
+        "Номер": r.get("Number"),
+        "Дата": r.get("Date"),
+        "Клиент": directory.partner_name(r.get("Партнер_Key")),
+        "Менеджер": manager,
+        "Статус": r.get("Статус") or ("Проведён" if r.get("Posted") else "Не проведён"),
+        "Сумма": round(_num(r.get("СуммаДокумента")), 2),
+    }
+    if with_items:
+        order["Позиции"] = [
+            {
+                **directory.item_info(row.get("Номенклатура_Key")),
+                "Количество": round(_num(row.get("Количество")), 3),
+                "Сумма": round(_num(row.get("Сумма")), 2),
+            }
+            for row in (r.get("Товары") or [])
+        ]
+    return order
+
+
 # Виды поступления денег, которые проверяет daily_payments. Табличная часть "РасшифровкаПлатежа"
 # у всех трёх одинаковая по смыслу: ОснованиеПлатежа(_Type) — полиморфная ссылка на документ,
 # под который пришла оплата (часто Document_ЗаказКлиента, но может быть и договор, и счёт).
